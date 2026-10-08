@@ -1,0 +1,36 @@
+# AgentRouter 自动签到 —— Egern 模块（最终版，链接已填好）
+#
+# 安装步骤：
+#   1. 把 agentrouter_checkin.egern.js 和本文件一起上传到你的 GitHub 仓库 egern-scripts
+#      （仓库 → Add file → Upload files → Commit changes）
+#   2. 点开本文件 → Raw → 复制地址栏 URL
+#   3. Egern → Tools → Modules → + → 粘贴 URL → 添加
+#   4. 点进模块 → 设置 → 填写 AGENTROUTER_ACCOUNT（邮箱#密码）
+#   5. 每天 08:10 自动运行并推送结果
+#
+# 说明：Egern 的 JS 运行时与 QX/Surge 不兼容，原版脚本无法直接使用，
+# 本模块搭配的是按 Egern API（ctx.http / ctx.storage / ctx.notify）重写的版本。
+
+name: AgentRouter 自动签到
+description: 每日定时登录 agentrouter.org 自动签到并推送结果通知
+author: ported-from-ddgksf2013
+
+# 在 Egern 模块设置页生成图形化表单，无需改脚本
+env_schema:
+  AGENTROUTER_ACCOUNT:
+    name: 账号
+    description: "邮箱#密码，例如 name@example.com#your_password"
+  AGENTROUTER_ACCOUNTS:
+    name: 多账号（可选）
+    description: 'JSON 数组，优先级高于单账号，例如 [{"name":"甲","account":"a@x.com#pwdA"}]'
+  AGENTROUTER_BASE_URL:
+    name: 站点地址
+    description: 默认为 https://agentrouter.org
+    default_value: https://agentrouter.org
+
+scriptings:
+  - schedule:
+      name: agentrouter-checkin
+      cron: "10 8 * * *"   # 每天 08:10（与 QX 原任务一致）
+      script_url: "https://raw.githubusercontent.com/uncle-lin666/egern-scripts/main/agentrouter_checkin.egern.js"
+      timeout: 120
