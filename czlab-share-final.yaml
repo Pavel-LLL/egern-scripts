@@ -1,0 +1,37 @@
+# czlab 兑换码每日分享 —— Egern 模块
+#
+# 安装步骤：
+#   1. 把 czlab_share.egern.js 和本文件一起上传到你的 GitHub 仓库 egern-scripts
+#      （仓库 → Add file → Upload files → Commit changes）
+#   2. 点开本文件 → Raw → 复制地址栏 URL
+#   3. Egern → Tools → Modules → + → 粘贴 URL → 添加
+#   4. 点进模块 → 设置 → 填写 CZLAB_CODE（你的 6 位 Muse 兑换码）
+#   5. 每天 09:00 自动运行：先查码是否还在池中，在则跳过，不在则提交
+#
+# 说明：兑换码仅在池中公开展示 24 小时，每天提交一次可保持持续曝光。
+# Egern 的 JS 运行时与 QX/Surge 不兼容，本脚本按 Egern 官方 API
+#（export default async function(ctx)，ctx.http / ctx.storage / ctx.notify）编写。
+
+name: czlab 兑换码每日分享
+description: 每天定时把你的 Muse 兑换码提交到 code.czlab.dev 兑换池
+author: lin
+
+# 在 Egern 模块设置页生成图形化表单，无需改脚本
+env_schema:
+  CZLAB_CODE:
+    name: 兑换码
+    description: "你的 6 位 Muse 兑换码，例如 WDE0F2"
+  CZLAB_CODES:
+    name: 多个兑换码（可选）
+    description: "多个码用逗号/空格/换行分隔，例如 WDE0F2,AB12CD"
+  CZLAB_BASE_URL:
+    name: 站点地址
+    description: 默认为 https://code.czlab.dev
+    default_value: https://code.czlab.dev
+
+scriptings:
+  - schedule:
+      name: czlab-share
+      cron: "0 20 * * *"   # 每天 20:00（Egern 按设备本地时区执行；想换时间改这一行）
+      script_url: "https://raw.githubusercontent.com/uncle-lin666/egern-scripts/main/czlab_share.egern.js"
+      timeout: 120
