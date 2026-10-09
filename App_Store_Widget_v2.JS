@@ -1,4 +1,4 @@
-// AppStore 限免小组件（优化版 v2）
+// AppStore 限免小组件（美区优化版 v2）
 // 基于 IBL3ND/App_Store_Widget.JS 重写
 //
 //
