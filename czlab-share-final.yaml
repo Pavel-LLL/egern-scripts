@@ -33,5 +33,5 @@ scriptings:
   - schedule:
       name: czlab-share
       cron: "0 20 * * *"   # 每天 20:00（Egern 按设备本地时区执行；想换时间改这一行）
-      script_url: "https://raw.githubusercontent.com/uncle-lin666/egern-scripts/main/czlab_share.egern.js"
+      script_url: "https://raw.githubusercontent.com/Pavel-LLL/egern-scripts/main/czlab_share.egern.js"
       timeout: 120
