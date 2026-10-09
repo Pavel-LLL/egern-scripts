@@ -1,18 +1,6 @@
 // AppStore 国区限免小组件
 // 与 App_Store_Widget_v2.JS（美区版）同一数据链路，验证区换成中国区
-//
-// （2026-10-10 实测）
-// 1. AppRaven GraphQL 取近期调价动态（appsOnSale，美区数据源，仅做"发现"用）
-// 过滤出真正"降到免费"的条目（priceTierTo == 0）——注意该接口返回的是
-// 所有降价动态，不过滤会把"只是降价、没免费"的也列出来
-// 2. 用 Apple 官方 iTunes Lookup 接口批量验证国区现价（一次请求最多 200 个 ID）
-// 只有 country=CN 下 price == 0 的才展示 —— 每个都是国区当前真实免费
-// 额外好处：返回的 trackName/trackViewUrl 是国区本地化名称和链接
-// 3. 全部失败时读 24 小时缓存兜底
-//
-// 实测：美区降到免费的 5 款中，4 款国区同样免费（1 款国区无上架，已自动过滤）。
-//
-// 用法：把本文件传到你的 GitHub 仓库，用 raw 链接作为 Egern 小组件的脚本 URL。
+
 
 export default async function(ctx) {
 const widgetFamily = ctx.widgetFamily || 'systemMedium';
