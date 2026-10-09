@@ -1,0 +1,318 @@
+// AppStore 国区+美区综合限免小组件
+// 上半部分国区、下半部分美区，一次抓取、两区并行验证
+//
+// （2026-10-10 实测）
+// 1. AppRaven GraphQL 取近期调价动态（appsOnSale，美区数据源，仅做"发现"用）
+// 过滤出真正"降到免费"的条目（priceTierTo == 0）
+// 2. Apple 官方 iTunes Lookup 批量验证：country=CN 与 country=US 各一次请求
+// 各自只保留当区 price == 0 的应用 —— 两边都是"当前真实免费"
+// 3. 全部失败时读 24 小时缓存兜底
+//
+// 布局：标题行 → 🇨🇳 国区N款 → 🇺🇸 美区N款。条目数按组件尺寸自动分配
+// （中号：国区3+美区2；大号：国区5+美区5，另各留 1 行给分区别名）。
+//
+// 用法：把本文件传到你的 GitHub 仓库，用 raw 链接作为 Egern 小组件的脚本 URL。
+
+export default async function(ctx) {
+const widgetFamily = ctx.widgetFamily || 'systemMedium';
+
+let maxItems = 7;
+if (widgetFamily === 'systemLarge') {
+maxItems = 12;
+}
+maxItems = parseInt(ctx.env?.maxItems) || maxItems;
+
+if (['systemSmall', 'accessoryCircular', 'accessoryInline', 'accessoryRectangular'].includes(widgetFamily)) {
+return {
+type: 'widget',
+padding: 16,
+backgroundColor: { light: '#FFFFFF', dark: '#2C2C2E'},
+children: [{
+type: 'text',
+text: '请使用中号或大号组件',
+font: { size: 'callout'},
+textColor: { light: '#1D1D1F', dark: '#F5F5F7'},
+textAlign: 'center'
+}]
+};
+}
+
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+const CACHE_KEY = 'appfree_cn_us_v1';
+const CACHE_TIME_KEY = 'appfree_cn_us_v1_time';
+const CACHE_TTL = 24 * 60 * 60 * 1000;
+
+// 预留 2 行给分区别名
+const itemBudget = Math.max(2, maxItems - 2);
+const cnMax = Math.ceil(itemBudget / 2);
+const usMax = Math.floor(itemBudget / 2);
+
+let cnApps = [], usApps = [];
+let fromCache = false;
+let cacheTime = 0;
+
+try {
+const freeIds = await fetchFreeIds(ctx, UA); // 两区共用一次发现
+const [cn, us] = await Promise.all([
+verifyByLookup(ctx, UA, freeIds, 'CN'),
+verifyByLookup(ctx, UA, freeIds, 'US'),
+]);
+cnApps = cn;
+usApps = us;
+console.log(`综合限免：国区 ${cnApps.length} 款 / 美区 ${usApps.length} 款`);
+} catch (e) {
+console.log('主链路失败:', e.message);
+}
+
+if (cnApps.length + usApps.length > 0) {
+try {
+ctx.storage.setJSON(CACHE_KEY, { cn: cnApps, us: usApps});
+ctx.storage.set(CACHE_TIME_KEY, Date.now().toString());
+} catch (e) { /* ignore */}
+} else {
+const cached = readCache(ctx, CACHE_KEY, CACHE_TIME_KEY, CACHE_TTL);
+if (cached) {
+cnApps = cached.cn || [];
+usApps = cached.us || [];
+fromCache = true;
+cacheTime = cached.time;
+console.log(`使用缓存：国区 ${cnApps.length} 款 / 美区 ${usApps.length} 款`);
+}
+}
+
+return buildWidget(cnApps.slice(0, cnMax), usApps.slice(0, usMax), fromCache, cacheTime);
+};
+
+function readCache(ctx, key, timeKey, ttl) {
+try {
+const cached = ctx.storage.getJSON(key);
+const t = parseInt(ctx.storage.get(timeKey) || '0');
+if (cached && t && Date.now() - t < ttl && ((cached.cn || []).length + (cached.us || []).length > 0)) {
+return { cn: cached.cn || [], us: cached.us || [], time: t};
+}
+} catch (e) { /* ignore */}
+return null;
+}
+
+// ============ 数据链路 ============
+
+// 步骤 1：AppRaven 发现"降到免费"的应用 ID（两区共用）
+async function fetchFreeIds(ctx, UA) {
+const query = `query WidgetSale($page: Int!, $pageSize: Int!) {
+appsOnSale(rareOnly: false, miniFilter: {ratingCount: 10}, page: $page, pageSize: $pageSize) {
+content {
+id
+timestamp
+app { id title ITunesId}
+... on AppActivityPriceChange { priceChangeType: type priceTierFrom priceTierTo}
+}
+}
+}`;
+
+const pages = await Promise.all([0, 1, 2].map(page =>
+ctx.http.post('https://appraven.net/appraven/graphql', {
+timeout: 12000,
+headers: {
+'Content-Type': 'application/json',
+'Accept': 'application/json',
+'User-Agent': UA,
+},
+body: JSON.stringify({ query, variables: { page, pageSize: 30}}),
+}).then(async (resp) => {
+const status = Number(resp.status || 0);
+if (status < 200 || status >= 300) throw new Error('AppRaven HTTP ' + status);
+const json = await resp.json();
+if (json.errors) throw new Error('GraphQL: ' + JSON.stringify(json.errors).slice(0, 100));
+const items = json?.data?.appsOnSale?.content;
+return Array.isArray(items)? items: [];
+})
+));
+
+const seen = new Set();
+const freeIds = [];
+for (const items of pages) {
+for (const it of items) {
+if (it.priceTierTo!== 0) continue; // 只是降价、没免费 → 不要
+const tid = it.app && it.app.ITunesId? String(it.app.ITunesId): '';
+if (tid &&!seen.has(tid)) {
+seen.add(tid);
+freeIds.push(tid);
+}
+}
+}
+console.log(`AppRaven 发现降到免费: ${freeIds.length} 款`);
+return freeIds;
+}
+
+// 步骤 2：iTunes Lookup 批量验证指定区现价，只保留 price == 0
+async function verifyByLookup(ctx, UA, ids, country) {
+if (!ids.length) return [];
+const resp = await ctx.http.get(
+`https://itunes.apple.com/lookup?id=${ids.slice(0, 100).join(',')}&country=${country}`,
+{ timeout: 12000, headers: { 'Accept': 'application/json', 'User-Agent': UA}}
+);
+const status = Number(resp.status || 0);
+if (status < 200 || status >= 300) throw new Error(`iTunes Lookup(${country}) HTTP ` + status);
+const data = await resp.json();
+
+const apps = [];
+for (const r of (data.results || [])) {
+if (Number(r.price)!== 0) continue; // 该区没免费 / 已涨回去 → 不要
+const name = (r.trackName || '').trim(); // 该区本地化名称
+if (!name) continue;
+apps.push({
+name: name.length > 50? name.substring(0, 50).trim() + '...': name,
+url: r.trackViewUrl || `https://apps.apple.com/app/id${r.trackId}`,
+});
+}
+return apps;
+}
+
+// ============ 构建组件 ============
+
+function sectionHeader(flag, label, count) {
+return {
+type: 'text',
+text: `${flag} ${label} · ${count}款`,
+font: { size: 'caption1', weight: 'semibold'},
+textColor: { light: '#86868B', dark: '#8E8E93'},
+padding: [8, 0, 2, 0],
+};
+}
+
+function appRow(app, isFirst) {
+const children = [];
+if (!isFirst) {
+children.push({
+type: 'stack',
+height: 0.5,
+backgroundColor: { light: 'rgba(0,0,0,0.08)', dark: 'rgba(255,255,255,0.12)'},
+margin: [4, 0]
+});
+}
+children.push({
+type: 'stack',
+direction: 'row',
+alignItems: 'center',
+gap: 10,
+url: app.url,
+padding: [4, 0],
+children: [
+{
+type: 'text',
+text: app.name,
+font: { size: 'subheadline'},
+textColor: { light: '#1D1D1F', dark: '#F5F5F7'},
+flex: 1,
+maxLines: 2,
+minScale: 0.85
+},
+{
+type: 'text',
+text: '限免',
+font: { size: 'caption2', weight: 'semibold'},
+textColor: '#34C759',
+maxLines: 1
+},
+{
+type: 'image',
+src: 'sf-symbol:chevron.right',
+width: 12,
+height: 12,
+color: { light: '#86868B', dark: '#8E8E93'}
+}
+]
+});
+return children;
+}
+
+function emptyLine() {
+return {
+type: 'text',
+text: '暂无',
+font: { size: 'caption1'},
+textColor: { light: '#AEAEB2', dark: '#636366'},
+padding: [2, 0],
+};
+}
+
+function buildWidget(cnApps, usApps, fromCache, cacheTime) {
+const children = [];
+
+const t = fromCache && cacheTime? new Date(cacheTime): new Date();
+const timeStr = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+const timeLabel = fromCache? `缓存 ${timeStr}`: timeStr;
+
+// 标题行
+children.push({
+type: 'stack',
+direction: 'row',
+alignItems: 'center',
+padding: [0, 0, 2, 0],
+children: [
+{
+type: 'text',
+text: '🎁 App 限免',
+font: { size: 'subheadline', weight: 'bold'},
+textColor: { light: '#1D1D1F', dark: '#F5F5F7'},
+flex: 1
+},
+{
+type: 'stack',
+direction: 'row',
+alignItems: 'center',
+gap: 4,
+children: [
+{
+type: 'image',
+src: 'sf-symbol:arrow.clockwise',
+width: 14,
+height: 14,
+color: { light: '#86868B', dark: '#8E8E93'}
+},
+{
+type: 'text',
+text: timeLabel,
+font: { size: 'caption2'},
+textColor: { light: '#86868B', dark: '#8E8E93'}
+}
+]
+}
+]
+});
+
+if (cnApps.length + usApps.length === 0) {
+children.push({
+type: 'text',
+text: '暂无限免应用\n\n请检查网络或稍后再试',
+font: { size: 'callout'},
+textColor: { light: '#666', dark: '#AAA'},
+textAlign: 'center',
+padding: [20, 0]
+});
+} else {
+// 上半部分：国区
+children.push(sectionHeader('🇨🇳', '国区', cnApps.length));
+if (cnApps.length === 0) {
+children.push(emptyLine());
+} else {
+cnApps.forEach((app, i) => children.push(...appRow(app, i === 0)));
+}
+// 下半部分：美区
+children.push(sectionHeader('🇺🇸', '美区', usApps.length));
+if (usApps.length === 0) {
+children.push(emptyLine());
+} else {
+usApps.forEach((app, i) => children.push(...appRow(app, i === 0)));
+}
+}
+
+return {
+type: 'widget',
+padding: [10, 12, 10, 12],
+gap: 4,
+backgroundColor: { light: '#FFFFFF', dark: '#2C2C2E'},
+refreshAfter: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+children: children
+};
+}
