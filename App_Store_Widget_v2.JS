@@ -145,10 +145,17 @@ const status = Number(resp.status || 0);
 if (status < 200 || status >= 300) throw new Error('iTunes Lookup HTTP ' + status);
 const data = await resp.json();
 
-const apps = [];
+// 按发现顺序（最新在前）组装：lookup 返回的顺序是乱的，必须按 ids 的顺序取
+const byId = {};
 for (const r of (data.results || [])) {
+byId[String(r.trackId)] = r;
+}
+const apps = [];
+for (const tid of freeIds.slice(0, 100)) {
+const r = byId[tid];
+if (!r) continue; // 该区未上架 → 不要
 if (Number(r.price)!== 0) continue; // 已涨回去 → 不要
-const name = (r.trackName || '').trim();
+const name = (r.trackName || '').trim(); 
 if (!name) continue;
 apps.push({
 name: name.length > 50? name.substring(0, 50).trim() + '...': name,
